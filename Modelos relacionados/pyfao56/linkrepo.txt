@@ -1,0 +1,2 @@
+https://github.com/ElsevierSoftwareX/SOFTX-D-22-00038 - version del paper
+https://github.com/kthorp/pyfao56?utm_source=chatgpt.com - version actualizada
