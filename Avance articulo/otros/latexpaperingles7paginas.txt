@@ -1,0 +1,403 @@
+\documentclass[conference]{IEEEtran}
+
+% =========================
+% Packages
+% =========================
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{siunitx}
+\usepackage{cite}
+\usepackage{float}
+
+% =========================
+\title{Grey-Box Modeling for Predictive Irrigation Control in Crop Systems}
+
+\author{%
+\IEEEauthorblockN{Andres Arias, Miguel Panqueva and Duvan Tellez-Castro}\
+}
+
+\begin{document}
+\maketitle
+
+% =========================
+
+\begin{abstract}
+This paper presents the design and implementation of a Model Predictive Controller (MPC) for regulating soil moisture in the root zone of a crop. A simplified dynamic model based on the soil water balance is employed, incorporating crop evapotranspiration and precipitation as external disturbances, as well as a moisture-dependent deep drainage term. The controller is formulated as a non-linear optimization problem with physical and operational constraints. Additionally, a preliminary grey-box approach based on a simple neural approximation is explored, aimed at evaluating its potential future integration as a complement to the physical model. Simulation results demonstrate that the MPC is capable of maintaining soil moisture close to a reference value, anticipating climatic disturbances and avoiding soil over-saturation.
+\end{abstract}
+
+\begin{IEEEkeywords}
+automatic irrigation, CasADI, deep drainage, evapotranspiration, predictive control, water balance. 
+\end{IEEEkeywords}
+
+% =========================
+\section{Introduction}
+
+Efficient water management in agriculture has become a critical challenge under increasing water scarcity, climate variability, and growing food demand. Irrigated agriculture accounts for approximately 70\% of global freshwater withdrawals and contributes around 40\% of total food production while occupying less than 20\% of cultivated land \cite{FAO_WaterPotential,SOLAW_Facts}. Projections indicate that global food demand may increase by more than 60\% by 2050, intensifying pressure on limited water resources \cite{UNWater2021,Lakhiar2024}. Consequently, improving irrigation efficiency is essential to ensure food security and environmental sustainability.
+
+Soil moisture in the root zone directly determines crop growth, yield formation, and physiological stability. Water deficit conditions induce plant stress, reduce photosynthetic activity, and decrease productivity, while excessive moisture promotes leaching, nutrient losses, and waterlogging \cite{Daryanto2017,Ploschuk2018}. Maintaining soil moisture within agronomically optimal bounds is therefore fundamental for maximizing water use efficiency and minimizing environmental impacts \cite{Lakhiar2024,Islam2025}. These considerations motivate the development of advanced irrigation management strategies capable of dynamically regulating the soil water balance.
+
+Traditional irrigation scheduling is typically based on fixed calendars, empirical rules, or simplified evapotranspiration estimates without real-time soil feedback \cite{Adeyemi2017,Evans2008}. Although widely adopted, such open-loop strategies do not explicitly account for the nonlinear dynamics of the soil--plant--atmosphere system nor for stochastic climatic disturbances \cite{Silva2020}. As a consequence, these strategies frequently result in either over-irrigation or deficit irrigation, decreasing water productivity and potentially contributing to soil degradation processes \cite{Lakhiar2024}. These limitations highlight the need for closed-loop control approaches grounded in dynamic system modeling.
+
+The FAO-56 guideline provides a standardized and globally accepted methodology for estimating crop evapotranspiration using the Penman--Monteith equation \cite{FAO56}. Despite its robustness for estimating crop water requirements, the conventional application of FAO-56 in irrigation scheduling is typically implemented in an open-loop manner, without dynamic feedback from real-time soil moisture measurements. As a result, it does not inherently compensate for model uncertainties, parameter variability, or unexpected climatic disturbances. Embedding FAO-based evapotranspiration models within closed-loop control frameworks therefore represents a promising approach to enhance irrigation performance and system resilience \cite{SmartIrrigationReview2022}.
+
+While closed-loop strategies such as moisture threshold methods have been traditionally used, more advanced decision support systems (DSS) have been proposed to manage the operational complexity of irrigation management \cite{NavarroHellin2016}. Although these approaches improve responsiveness compared to open-loop schemes, they present limitations in handling multivariable constraints, time delays, and predictive disturbance rejection \cite{Bwambale2023}. Moreover, soil moisture dynamics are inherently nonlinear and subject to uncertain external disturbances such as precipitation and evapotranspiration variability \cite{Ghiat2025}. Therefore, more advanced control methodologies are required to effectively address these challenges.
+
+
+Model Predictive Control (MPC) has emerged as a powerful framework for agricultural water management due to its ability to incorporate dynamic models, constraints, and future disturbance predictions into an optimization-based decision process \cite{Camacho2013,Bwambale2024,Liu2025}. Recent studies demonstrate that MPC-based irrigation strategies can significantly reduce water consumption while maintaining or improving crop yield compared to conventional methods \cite{Bwambale2023,Ghiat2025}. By solving a receding-horizon optimization problem, MPC anticipates climatic disturbances and enforces physical constraints such as soil saturation limits and actuator bounds. These features make MPC particularly suitable for regulating soil moisture within agronomic and hydrological constraints.
+
+In addition to purely physics-based modeling, hybrid Grey-Box approaches that combine mechanistic models with data-driven techniques have gained increasing attention in agricultural water management \cite{Islam2025,Wang2024}. Machine learning models, particularly neural networks, can be employed to capture residual nonlinear dynamics not explicitly represented in simplified soil water balance formulations. By complementing physical knowledge with data-driven corrections, these hybrid strategies aim to improve predictive performance while maintaining a degree of physical interpretability. Such integration is consistent with emerging trends toward intelligent and explainable agricultural control systems.
+
+This work proposes a predictive irrigation control scheme based on a dynamic soil water balance model that explicitly incorporates crop evapotranspiration, precipitation disturbances, and moisture-dependent deep drainage. Furthermore, a preliminary Grey-Box extension based on a residual neural network is explored to compensate for unmodeled dynamics while preserving physical interpretability. The remainder of this article is organized as follows: Section II presents the system modeling framework; Section III details the predictive control formulation and implementation; Section IV discusses simulation results under different operational scenarios; and Section V provides a comprehensive validation of the Grey-Box model along with concluding remarks.
+
+
+% =========================
+
+\section{Dynamic System Model}
+This section presents the dynamic model of the soil--plant--atmosphere system that describes the evolution of soil moisture based on the main water flows: irrigation, precipitation, evapotranspiration, and drainage. This model constitutes the mathematical basis for the design of the model predictive controller.
+
+
+
+\subsection{Soil water balance}
+
+The system is modeled through a water balance equation in the root zone, where the state variable is the volumetric soil moisture. The continuous dynamics of the system are expressed as
+
+\begin{equation}
+\label{eq:water_balance}
+\begin{equation}
+\frac{d\theta}{dt} = \frac{1}{Z_r} \left( I(t) + P(t) - ET_c(t,\theta) - D(t, \theta) \right),
+\end{equation}
+
+\noindent
+where $\theta$ is the volumetric soil moisture, $Z_r$ is the effective depth of the root zone (\si{\milli\meter}), $I(t)$ and $P(t)$ represent irrigation and precipitation, $ET_c(t,\theta)$ is the actual crop evapotranspiration, and $D(\theta)$ is the deep drainage, following the classical water balance approach proposed in \cite{FAO56}.
+
+\subsection{Precipitation modeling}
+
+In the early stages, precipitation was modeled as a rectangular pulse using step functions as follow
+\begin{equation*}
+P(t) = P_{0} [H(t - t_{1}) - H(t - t_{2})],
+\end{equation*}
+\noindent where $P(t)$ is the precipitation in mm/day, $P_{0}$ is the intensity of the rain event, $t_{1}$ and $t_{2}$ delimit the start and end of the event, and $H(\cdot)$ is the Heaviside function.
+
+This formulation introduces discontinuities in time, which does not adequately represent the actual evolution of rainfall. For this reason, a continuous formulation based on a double sigmoid was subsequently adopted as
+\begin{equation*}
+P(t) = P_{\max} \left[ \frac{1}{1 + e^{-a(t-t_{1})}} - \frac{1}{1 + e^{-a(t-t_{2})}} \right],
+\end{equation*}
+\noindent where $P_{\max}$ is the maximum rain intensity, $a > 0$ is the smoothing parameter that controls the growth and decay slope of the event, and $t_{1}, t_{2}$ represent the beginning and end of the event. This function describes a progressive increase in rain, followed by a gradual decrease, reproducing more realistically the dynamics of a precipitation event.
+
+\subsection{Reformulation of crop evapotranspiration}
+
+In a first approximation, crop evapotranspiration can be considered as an external signal dependent only on time. However, this formulation does not reflect the physical fact that the actual crop evapotranspiration is reduced when the soil presents a water deficit. In order to explicitly introduce this effect, evapotranspiration is reformulated as
+
+\begin{equation*}
+\label{eq:etc}
+ET_c(t,\theta)=ET_{c,\text{pot}}(t)\,K_s(\theta),
+\end{equation*}
+
+\noindent
+where $ET_{c,\text{pot}}(t)$ is the potential crop evapotranspiration, determined from climatic models, and $K_s(\theta)$ is the water stress coefficient, defined as a non-linear and bounded function $K_s:[0,1]\rightarrow[0,1]$, according to FAO-56 \cite{FAO56}.
+
+The coefficient $K_s(\theta)$ models the progressive reduction of evapotranspiration when soil moisture falls below a critical threshold, taking values close to one in optimal conditions and approaching zero under water stress.
+
+
+
+Two critical moisture levels are considered: the permanent wilting point $\theta_{wp}$ and the field capacity $\theta_{fc}$, which delimit the soil's hydraulic operating range.
+
+Initially, water stress was modeled in a binary form
+
+\begin{equation*}
+K_{s}(\theta) = \begin{cases} 
+0, & \theta \leq \theta_{wp} \\ 
+1, & \theta \geq \theta_{fc} 
+\end{cases},
+\end{equation*}
+
+This formulation introduces abrupt changes that do not adequately represent the physiological behavior of the plant and also generate discontinuities that hinder MPC optimization. For this reason, $K_{s}$ was reformulated as a continuous function
+
+\begin{equation*}
+K_{s}(\theta) = \begin{cases} 
+0, & \theta \leq \theta_{wp} \\ 
+\frac{\theta - \theta_{wp}}{\theta_{fc} - \theta_{wp}}, & \theta_{wp} < \theta < \theta_{fc} \\ 
+1, & \theta \geq \theta_{fc} 
+\end{cases},
+\end{equation*}
+
+The function models the progressive increase in water stress as a function of soil moisture, using continuous formulations that avoid abrupt saturations and guarantee differentiability, a key requirement for the MPC.
+
+In this context, $ET_{c,\text{pot}}$ acts as an external climatic disturbance, while $K_s(\theta)$ introduces non-linear feedback that relates the hydraulic state of the soil with the actual transpiration of the crop, allowing the separation of atmospheric demand from the soil--crop response.
+
+\subsection{Deep drainage modeling}
+
+Deep drainage represents water losses when soil moisture exceeds field capacity, causing flow into deeper layers. This phenomenon depends solely on the water state and is not controllable.
+In the model, drainage is incorporated into the system dynamics without being defined as a state or control variable. Its activation upon exceeding field capacity allows for a physically consistent representation of moisture losses associated with over-saturation. In this work, drainage is initially modeled as a non-linear function of soil moisture
+
+\begin{equation*}
+\label{eq:drenaje}
+D(\theta)=
+\begin{cases}
+0, & \theta\leq\theta_{fc} \\
+k_d(\theta-\theta_{fc}), & \theta>\theta_{fc}
+\end{cases},
+\end{equation*}
+
+\noindent
+where $k_d$ is a positive coefficient representing the drainage rate. This approach, common in modeling gravitational losses \cite{deep_drainage}, activates drainage only when $\theta > \theta_{fc}$. However, this instantaneous activation is not physically realistic, as percolation increases gradually as soil pores become saturated. To resolve this issue, drainage was reformulated using a softplus-type smooth function
+
+\begin{equation*}
+D(\theta) = K_{d} \frac{1}{10} \ln \left( 1 + e^{10(\theta - \theta_{fc})} \right),
+\end{equation*}
+
+This function preserves two key properties:
+\begin{enumerate}
+    \item For $\theta \ll \theta_{fc}$, drainage is practically zero.
+    \item For $\theta > \theta_{fc}$, drainage grows approximately linearly with $\theta$, as in the original piecewise model.
+\end{enumerate}
+
+The smoothing parameter $\alpha=10$ controls the speed of the transition. Thus, the smoothed model maintains the physical coherence of the percolation process while eliminating the discontinuities that affect MPC performance. This formulation ensures that the drainage remains twice-differentiable ($C^2$ continuity), which is a key requirement for the numerical stability and convergence of the interior-point optimizer (IPOPT) used in the control law. The mathematical model developed in this section establishes the foundation for the predictive control strategy and the optimization problem formulated in Section III.
+
+
+% =========================
+\section{CONTROL METHODOLOGY}
+
+This section describes the design of the proposed predictive controller, whose objective is to regulate soil moisture $\theta$ around a reference value while optimizing water resources. As illustrated in Fig. \ref{fig:diagrama_control}, the MPC utilizes the dynamic model to predict the future evolution of the system and calculate the optimal irrigation action $I(t)$, explicitly accounting for climatic disturbances.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/DiagramaMPC.png}
+\caption{Block diagram of the irrigation control system.}
+\label{fig:diagrama_control}
+\end{figure}
+
+\subsection{Model Predictive Control Formulation}
+
+To implement the MPC, the water balance \eqref{eq:water_balance} is discretized using the forward Euler method with a sampling time step $dt$. This discrete-time formulation enables the recursive modeling of volumetric soil moisture $\theta(k)$ as a function of the applied irrigation $I(k)$ and climatic disturbances, facilitating efficient numerical optimization. 
+
+The controller's performance is governed by an objective function that penalizes both the deviation of moisture from a reference value $\theta_{\text{ref}}$ and the excessive use of irrigation. Following standard MPC formulations \cite{Camacho2013}, the cost function is defined as
+
+\begin{equation}
+\label{eq:cost}
+J = \sum_{k=1}^{N} \left( \theta(k) - \theta_{\text{ref}} \right)^2 + \lambda I(k)^2,
+\end{equation}
+
+\noindent where $N$ represents the prediction horizon and $\lambda$ is a weighting parameter used to balance the trade-off between regulation precision and resource conservation.
+
+To ensure physically viable trajectories, the MPC incorporates constraints on both state and control variables throughout the horizon. Soil moisture is bounded by $\theta_{min} \leq \theta(k) \leq \theta_{max}$, with limits set at $0.1$ and $0.4$, respectively. Similarly, the irrigation action is restricted to $0 \leq I(k) \leq I_{max}$, where $I_{max}$ denotes the system's maximum capacity. The inclusion of integral action within this constrained framework compensates for persistent modeling errors without leading to signal saturation, ensuring robust steady-state performance.
+
+\subsection{Grey-Box Modeling Approach}
+
+The Grey-box modeling framework integrates deterministic physical knowledge (\textit{white-box}) with the stochastic flexibility of data-driven methods (\textit{black-box}). In this work, the system dynamics are decomposed into a nominal physical component and a learned residual term, expressed as
+
+\begin{equation*}
+\label{eq:grey_box_sum}
+\theta_{GB}(k+1) = f_{phys}(\theta(k), u(k), d(k)) + \text{ANN}(x_{in}(k)),
+\end{equation*}
+
+\noindent where $f_{phys}$ represents the discretized soil water balance equation, and $\text{ANN}(x_{in}(k))$ denotes the residual term $r(k)$. The neural network utilizes a Multilayer Perceptron (MLP) architecture with two hidden layers (10 and 6 neurons, respectively) and \textit{tanh} activation functions to ensure a smooth, differentiable mapping. The input vector is defined as $x_{in}(k) = [\theta(k), u(k), P(k), ET_c(k)]^T$, incorporating the state, control action, and disturbances.
+
+The learning objective focuses exclusively on the discrepancy between the simplified EDO and the plant's actual behavior. By targeting the residual $\Delta\theta = \theta_{real} - \theta_{model}$, the network compensates for unmodeled phenomena, such as non-linear drainage or varying crop coefficients, without losing the physical interpretability of the irrigation input $u(k)$. This structure is sufficient to represent the unmodeled soil dynamics, providing a high-fidelity prediction horizon that combines conservation laws with adaptive machine learning. The performance of this hybrid control architecture is evaluated through the simulation scenarios and the grey-box identification tests presented in Section IV.
+
+% =========================
+\section{Simulation Results}
+
+\subsection{Incremental Model Evolution and Controller Response}
+
+This section presents the results obtained by evaluating the performance of the Model Predictive Controller (MPC) under various operating scenarios. To analyze the algorithm's robustness and responsiveness, the validation was structured as an incremental refinement process, gradually increasing the physical fidelity of the water balance model to reach a realistic representation of the soil--plant system. The complete MATLAB--CasADi implementation, including the scripts used for these simulations, is available in a public repository.\footnote{https://github.com/MiguelPanqueva2023/soil-moisture-mpc-greybox}
+All numerical simulations were conducted in a controlled computational environment using a daily time step ($dt=1$). These were implemented in MATLAB R2025 and the CasADi optimization framework. The hardware configuration consisted of an AMD Ryzen 5 7520U with 2.8 GHZ processor and 16 GB of RAM. This setup ensured efficient execution of the NLP solver (IPOPT), with average computation times per iteration suitable for real-time irrigation scheduling applications.
+
+In the first phase, the controller was evaluated on idealized storage dynamics without disturbances. As shown in Fig.~\ref{fig:modelo_base}, the MPC achieves precise asymptotic regulation toward the 0.25 reference, starting from a dry initial state. Subsequently, precipitation was integrated as a pulse-type external disturbance. The results in Fig.~\ref{fig:precipitacion} demonstrate the anticipatory capacity of the MPC, which reduces irrigation upon detecting the incoming external water input. Following this line, time-varying crop evapotranspiration ($ETc(t)$) was incorporated; Fig.~\ref{fig:etc_variable} illustrates how the controller compensates for these continuous losses through periodic updates to maintain the mass balance.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/modelo_base.png}
+\caption{Evolution of soil moisture and irrigation signal for the base model without disturbances.}
+\label{fig:modelo_base}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/lluvia.png}
+\caption{Comparison of the irrigation signal in the presence and absence of precipitation.}
+\label{fig:precipitacion}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/etc_variable.png}
+\caption{Time-varying crop evapotranspiration and irrigation response obtained via MPC.}
+\label{fig:etc_variable}
+\end{figure}
+
+In consecutive stages, the model was endowed with state dependencies to capture more complex biophysical phenomena. First, the water stress coefficient ($K_s$) was implemented, making the ETc dependent on the current moisture level. Subsequently, the constant drainage was replaced by a non-linear function active only above field capacity. Although these correspond to independent development milestones, both share the results shown in Fig.~\ref{fig:estres_hidrico}, which evidence a much richer balance dynamic where losses adjust to the actual water availability in the profile.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/estres_hidrico.png}
+\caption{Water stress coefficient, moisture-dependent drainage, and soil moisture evolution.}
+\label{fig:estres_hidrico}
+\end{figure}
+
+To ensure the numerical viability of the optimizer (IPOPT) in the face of these non-linearities, the differentiability of the functions was addressed. Fig.~\ref{fig:suavizaciones} presents the results after applying smoothing via the \textit{softplus} function specifically to the drainage and the $K_s$ coefficient of the ETc, eliminating abrupt changes in the derivatives of these processes. A distinct advancement is shown in Fig.~\ref{fig:saturaciones}, where "smooth physical saturations" were implemented to handle moisture and control limits, also incorporating an integral action component. This stage was crucial for eliminating steady-state errors and softening the controller's response to the system's physical constraints.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/suavizaciones.png}
+\caption{MPC response under smooth formulations for drainage and water stress ($K_s$).}
+\label{fig:suavizaciones}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/saturaciones_fisicas.png}
+\caption{Effect of smooth physical saturations and integral action on soil moisture stability.}
+\label{fig:saturaciones}
+\end{figure}
+
+The final approach to a realistic scenario included improvements in disturbance profiles and operational objectives. In Fig.~\ref{fig:lluviasigmoide}, pulse-type rainfall was substituted by double sigmoid functions, managing to represent precipitation events with gradual and realistic intensity profiles. Finally, the physical model culminated with the integration of a dynamic physiological reference and its validation in a comprehensive 60-day climatic scenario. As shown in Fig.~\ref{fig:escenarios}, the system responds robustly to the combination of variable moisture, smoothed non-linear drainage, and realistic disturbances, consolidating a control scheme that balances agronomic precision with computational stability.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/lluvia_sigmoide.png}
+\caption{Continuous modeling of rain events using a double sigmoid function.}
+\label{fig:lluviasigmoide}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/escenarios.png}
+\caption{MPC performance under variable moisture references and contrasting climatic scenarios.}
+\label{fig:escenarios}
+\end{figure}
+
+This performance establishes the basis for the next phase of the study. Given that even the most detailed physical model has limitations in capturing unmodeled dynamics or uncertain parametric variations, the \textbf{grey-Box} approach is introduced below. In subsections J to L, the design and training of a residual neural network will be described, aimed at learning the discrepancies between this developed physical model and the observed behavior of a "real plant", seeking to close the precision gap through machine learning.
+
+\subsection{Grey-Box Identification: Data Generation and Training}
+
+To bridge the gap between theoretical modeling and unmodeled biophysical dynamics, a Grey-Box identification process was implemented. Synthetic data were generated by integrating the predictive controller with the physical model under realistic operating conditions. The controller calculates optimal irrigation using the physical model, while the simulated plant includes smooth disturbances and bounded noise. This simulation setup allows for the collection of high-fidelity state-action pairs across the entire operating range.
+
+The residual is defined as the mathematical difference between the theoretical model response and the perturbed plant response. Fig.~\ref{fig:greybox_dataset} illustrates that while the physical model captures global trends, the simulated plant exhibits specific biophysical deviations. These residuals are bounded and exhibit a clear temporal structure, proving they represent learnable patterns rather than pure stochastic noise. Such predictability confirms that the Grey-Box approach can effectively compensate for systematic modeling gaps.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/dataset_greybox.png}
+\caption{Synthetic data generation: (top) moisture evolution (model vs plant); (center) irrigation calculated by the MPC; (bottom) residual term target for neural network training.}
+\label{fig:greybox_dataset}
+\end{figure}
+
+The identification of these dynamics was performed using the two-hidden-layer MLP architecture described in Section III. The network was trained for 3,000 epochs via mean squared error minimization using a gradient descent algorithm with a fixed learning rate of 0.01. To ensure consistent learning, all inputs and targets were normalized to the range $[0, 1]$ using Min-Max scaling. While \textit{tanh} activation functions are employed in the hidden layers to capture non-linearities, a linear activation is used in the output layer to allow the model to estimate the full numerical range of the residual discrepancy. As illustrated in Fig.~\ref{fig:nn_residual}, the trained model accurately tracks the residual trend without introducing high-frequency instabilities, ensuring its readiness for real-time closed-loop operation and rigorous stability analysis.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/nn_residual.png}
+\caption{Comparison between the system's actual residual and the residual estimated by the trained neural network.}
+\label{fig:nn_residual}
+\end{figure}
+
+
+\subsection{Integration of the Grey-Box model into the MPC controller}
+
+The residual neural network was integrated into the MPC under a Grey-Box approach, where the physical model defines the main dynamics and the network provides a corrective term $r(k)$ at each time step. By calculating $x_{k+1} = \theta_{phys} + r$, the controller compensates for systematic biases and unmodeled drainage effects. This compensation improves reference tracking and system resilience without significantly increasing the control effort, as demonstrated in Fig.~\ref{fig:greybox_mpc}.
+
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{imagenes/greybox_mpc.png}
+\caption{Comparison between the physical model and the Grey-Box scheme within the MPC.}
+\label{fig:greybox_mpc}
+\end{figure}
+
+\section{Conclusions and Final Remarks}
+
+This study demonstrates that incorporating physical complexity, such as moisture-dependent drainage and water stress, significantly enhances soil dynamics representation within a predictive framework. While initial models faced numerical challenges, the implementation of \textit{softplus} smoothing functions ensured the convergence of the nonlinear optimizer without compromising physical consistency. These results confirm that a refined water balance model provides a robust foundation for stable irrigation regulation across diverse climatic scenarios. Consequently, the proposed architecture effectively balances agronomic precision with the computational requirements of real-time control systems.
+
+The transition to a hybrid Grey-Box approach successfully bridged the gap between simplified physical laws and complex unmodeled dynamics. By utilizing a residual neural network to compensate for systematic biases, the controller achieved superior reference tracking and enhanced predictive accuracy. This dual methodology proves that combining mechanistic interpretability with machine learning flexibility offers a scalable solution for precision agriculture. Future work will focus on validating this scheme with experimental field data and assessing its performance under significant sensor noise and parametric uncertainty.
+
+
+% =========================
+
+\begin{thebibliography}{99}
+
+\bibitem{FAO_WaterPotential}
+Food and Agriculture Organization of the United Nations (FAO), 
+\emph{Unlocking the Water Potential of Agriculture}. 
+Rome, Italy: FAO, 2003. 
+[Online]. Available: https://www.fao.org/4/y4525e/y4525e00.htm 
+
+\bibitem{SOLAW_Facts}
+Food and Agriculture Organization of the United Nations (FAO), 
+``The State of the World’s Land and Water Resources for Food and Agriculture 2021 (SOLAW) – Facts and Figures,'' 
+FAO, Rome, Italy, 2021. 
+[Online]. Available: https://www.fao.org/land-water/solaw2021/facts/en/ 
+
+
+\bibitem{UNWater2021}
+UN-Water, \emph{The United Nations World Water Development Report 2021: Valuing Water}. Paris, France: UNESCO, 2021. [Online]. Available: https://unesdoc.unesco.org/ark:/48223/pf0000375724
+
+\bibitem{Lakhiar2024}
+I. A. Lakhiar \emph{et al.}, ``A Review of Precision Irrigation Water-Saving Technology under Changing Climate for Enhancing Water Use Efficiency, Crop Yield, and Environmental Footprints,'' \emph{Agriculture}, vol. 14, no. 7, p. 1141, Jul. 2024, doi: 10.3390/agriculture14071141.
+
+\bibitem{Daryanto2017}
+S. Daryanto, L. Wang, and P. A. Jacinthe, ``Global synthesis of drought effects on cereal, legume, tuber and root crops production: A review,'' \emph{Agricultural Water Management}, vol. 179, pp. 18--33, Jan. 2017, doi: 10.1016/j.agwat.2016.04.022.
+
+\bibitem{Ploschuk2018}
+R. A. Ploschuk, D. J. Miralles, and T. D. Colmer, ``Waterlogging of Winter Crops at Early and Late Stages: Impacts on Leaf Physiology, Growth and Yield,'' \emph{Frontiers in Plant Science}, vol. 9, p. 1863, Oct. 2018, doi: 10.3389/fpls.2018.01863.
+
+\bibitem{Islam2025}
+M. B. Islam, A. Guerrieri, R. Gravina, D. T. Delaney, and G. Fortino, ``From Traditional Machine Learning to Fine-Tuning Large Language Models: A Review for Sensors-Based Soil Moisture Forecasting,'' \emph{Sensors}, vol. 25, no. 22, p. 6903, Nov. 2025, doi: 10.3390/s25226903.
+
+\bibitem{Adeyemi2017}
+O. Adeyemi, I. Grove, S. Peets, and J. Norton, ``Advanced Monitoring and Management Systems for Improving Sustainability in Precision Irrigation,'' \emph{Sustainability}, vol. 9, no. 3, p. 353, Feb. 2017, doi: 10.3390/su9030353.
+
+\bibitem{Evans2008}
+R. G. Evans and E. J. Sadler, ``Methods and Technologies to Improve Efficiency of Water Use,'' \emph{Water Resources Research}, vol. 44, no. 7, p. W00E04, Jul. 2008, doi: 10.1029/2007WR006200.
+
+\bibitem{Silva2020}
+D. C. da Silva, J. A. S. Dias, R. G. A. da Silva, and L. C. S. Junior,
+``A review on monitoring and advanced control strategies for precision irrigation,'' 
+\emph{Computers and Electronics in Agriculture}, vol. 173, 105441, Jan 2020, 
+doi: 10.1016/j.compag.2020.105441.
+
+\bibitem{FAO56}
+R. G. Allen, L. S. Pereira, D. Raes, and M. Smith, 
+\emph{Crop Evapotranspiration – Guidelines for Computing Crop Water Requirements}. 
+FAO Irrigation and Drainage Paper 56, Rome, Italy: Food and Agriculture Organization of the United Nations (FAO), 1998.
+
+\bibitem{SmartIrrigationReview2022}
+A. Abioye, J. Zazueta, and D. Arellano, 
+``Smart irrigation monitoring and control strategies for improving water use efficiency in precision agriculture: A review,'' 
+\emph{Agricultural Water Management}, vol. 260, 107324, Feb 2022, 
+doi:10.1016/j.agwat.2021.107324.
+
+\bibitem{NavarroHellin2016}
+H. Navarro-Hellín, J. Martínez-del-Rincon, R. Domingo-Miguel, F. Soto-Valles, and R. Torres-Sánchez, ``A decision support system for managing irrigation in agriculture,'' \emph{Computers and Electronics in Agriculture}, vol. 124, pp. 121--131, Jun. 2016, doi: 10.1016/j.compag.2016.04.003.
+
+\bibitem{Bwambale2023}
+E. Bwambale, F. K. Abagale, and G. K. Anornu, ``Data-driven model predictive control for precision irrigation management: A review,'' \emph{Smart Agricultural Technology}, vol. 3, p. 100074, Feb. 2023, doi: 10.1016/j.atech.2022.100074.
+
+\bibitem{Ghiat2025}
+I. Ghiat, R. Govindan, and T. Al-Ansari, 
+“Data-driven model predictive control for irrigation management in agricultural greenhouses under CO$_2$ enrichment,” 
+\emph{Smart Agricultural Technology}, vol. 12, Art. no. 101071, Dec 2025, 
+doi:10.1016/j.atech.2025.101071.
+
+\bibitem{Camacho2013}
+E. F. Camacho and C. Bordons, \emph{Model Predictive Control}, 2nd ed. London, U.K.: Springer, 2013.
+
+\bibitem{Bwambale2024}
+E. Bwambale, F. K. Abagale, and G. K. Anornu, ``Towards a modelling, optimization and predictive control framework for smart irrigation,'' \emph{Heliyon}, vol. 10, no. 18, p. e38095, Sep. 2024, doi: 10.1016/j.heliyon.2024.e38095.
+
+\bibitem{Liu2025}
+A. Liu, D. Zhao, and Y. Wei, ``Model predictive control of adaptive irrigation decisions incorporating rainfall intensity and soil properties,'' \emph{Agriculture}, vol. 15, no. 5, p. 527, Feb 2025, doi: 10.3390/agriculture15050527.
+
+\bibitem{Wang2024}
+Y. Wang, L. Shi, Y. Hu, X. Hu, W. Song, and L. Wang, 
+“A comprehensive study of deep learning for soil moisture prediction,” 
+\emph{Hydrology and Earth System Sciences}, vol. 28, no. 4, pp. 917–943, 2024, 
+doi: 10.5194/hess-28-917-2024. 
+
+
+\end{thebibliography}
+
+\end{document}

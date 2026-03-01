@@ -1,0 +1,77 @@
+clc; clear; close all;
+
+%% =============================
+% 1. Datos (ejemplo)
+%% =============================
+x = [0 1 2 3 4 5];                 % Entrada (ej: tiempo, humedad, etc)
+y_real = [0 0.8 1.9 3.1 4.0 5.2];  % Salida real (respuesta del sistema)
+
+x = x(:);        % columna
+y_real = y_real(:);
+
+%% =============================
+% 2. Parámetros de la red
+%% =============================
+n_in = 1;        % neuronas de entrada
+n_hidden = 4;    % neuronas capa oculta (mejora frente a 1)
+n_out = 1;       % neurona de salida
+
+% Inicialización de pesos
+W1 = randn(n_hidden, n_in) * 0.1;
+b1 = zeros(n_hidden,1);
+
+W2 = randn(n_out, n_hidden) * 0.1;
+b2 = 0;
+
+lr = 0.01;       % tasa de aprendizaje
+epochs = 3000;
+
+%% =============================
+% 3. Entrenamiento (backpropagation)
+%% =============================
+for k = 1:epochs
+
+    % ---- FORWARD ----
+    z1 = W1*x' + b1;           % capa oculta (pre-activación)
+    a1 = tanh(z1);             % activación no lineal
+
+    y_pred = W2*a1 + b2;       % salida lineal
+
+    % ---- ERROR ----
+    error = y_real' - y_pred;
+
+    % ---- BACKPROP ----
+    dW2 = -2 * mean(error .* a1, 2)';
+    db2 = -2 * mean(error);
+
+    delta1 = (W2' .* (1 - a1.^2)) .* error;
+    dW1 = -2 * mean(delta1 .* x', 2);
+    db1 = -2 * mean(delta1, 2);
+
+    % ---- UPDATE ----
+    W2 = W2 - lr * dW2;
+    b2 = b2 - lr * db2;
+
+    W1 = W1 - lr * dW1;
+    b1 = b1 - lr * db1;
+end
+
+%% =============================
+% 4. Evaluación
+%% =============================
+x_test = linspace(0,5,100)';
+z1_test = W1*x_test' + b1;
+a1_test = tanh(z1_test);
+y_nn = (W2*a1_test + b2)';
+
+%% =============================
+% 5. Gráfica
+%% =============================
+figure;
+plot(x, y_real, 'bo', 'LineWidth', 2); hold on;
+plot(x_test, y_nn, 'r-', 'LineWidth', 2);
+grid on;
+xlabel('Entrada');
+ylabel('Salida');
+legend('Datos reales', 'Red neuronal');
+title('Ajuste con red neuronal de 3 capas');

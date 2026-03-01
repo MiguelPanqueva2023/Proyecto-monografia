@@ -1,0 +1,50 @@
+clc; clear; close all;
+
+%% =============================
+% 1. Datos reales
+%% =============================
+x = [0 1 2 3 4 5];          % Entrada (ej: tiempo, riego acumulado, etc)
+y_real = [0 0.8 1.9 3.1 4.0 5.2]; % Salida real (humedad, respuesta, etc)
+
+%% =============================
+% 2. Inicialización de la NN (1 neurona lineal)
+%% =============================
+w = randn;   % peso
+b = randn;   % sesgo
+
+lr = 0.01;   % tasa de aprendizaje
+epochs = 2000;
+
+%% =============================
+% 3. Entrenamiento (descenso de gradiente)
+%% =============================
+for k = 1:epochs
+    y_pred = w*x + b;                % salida de la neurona
+    error = y_real - y_pred;
+
+    % Gradientes
+    dw = -2 * mean(error .* x);
+    db = -2 * mean(error);
+
+    % Actualización
+    w = w - lr * dw;
+    b = b - lr * db;
+end
+
+%% =============================
+% 4. Evaluación
+%% =============================
+x_test = linspace(0,5,100);
+y_nn = w*x_test + b;
+
+%% =============================
+% 5. Gráfica
+%% =============================
+figure;
+plot(x, y_real, 'bo-', 'LineWidth', 2); hold on;
+plot(x_test, y_nn, 'r-', 'LineWidth', 2);
+grid on;
+xlabel('Entrada');
+ylabel('Salida');
+legend('Datos reales', 'Red neuronal');
+title('Ajuste con red neuronal lineal');

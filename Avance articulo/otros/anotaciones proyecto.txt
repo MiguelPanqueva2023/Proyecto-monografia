@@ -1,0 +1,111 @@
+¿Qué significa “analizar la robustez” del MPC?
+
+(No se implementa aún, solo se explica)
+
+1️⃣ Qué es robustez en este contexto
+
+La robustez mide si el controlador:
+
+Sigue funcionando bien cuando:
+
+el modelo no es exacto
+
+los parámetros cambian
+
+hay errores de medición
+
+Ejemplos:
+
+Zr mal estimado
+
+ETc subestimada
+
+lluvia no prevista
+Qué se haría más adelante
+
+Análisis típico de robustez:
+
+Variar parámetros:
+
+Zr ±20%
+
+Kc ±10%
+
+ETc con ruido
+
+Comparar:
+
+error de seguimiento
+
+consumo de agua
+
+estabilidad
+
+El drenaje en el suelo ocurre porque:
+
+El suelo se satura
+
+El exceso de agua percola hacia capas profundas
+
+📌 Eso depende directamente de la humedad, no del reloj.
+El drenaje no es:
+
+ni una variable de control
+
+ni una perturbación externa
+
+ni un parámetro libre
+
+👉 Es una función interna del estado.
+El drenaje aparece solo dentro del modelo dinámico.
+
+Forma parte de la función 
+f(x,u).
+
+No se agrega al vector de parámetros ni al vector de decisión.
+
+ETAPA 6
+Reemplazar el modelo físico por el modelo Grey-Box
+
+Aquí conectas TODO con el marco teórico.
+
+θk+1=fEDO(θk,uk)+fNN(xk)
+
+Dónde:
+
+fEDO: balance hídrico
+fNN: corrección aprendida
+
+Etapa 2:
+En una primera aproximación, la precipitación se modela como una perturbación externa tipo pulso rectangular, definida mediante una función a trozos en el tiempo. Este modelo idealizado permite aislar el efecto causal de la lluvia sobre la humedad del suelo y verificar que el MPC reacciona reduciendo el riego cuando ocurre un evento de precipitación. Primero modelé la lluvia como una perturbación a trozos para validar que el MPC reacciona correctamente; después la refinaré con una función suave tipo sigmoidal para representar eventos meteorológicos reales sin discontinuidades.
+Matemáticamente, lo que estás usando es:
+
+P(t)={Pmax,	t1≤t≤t2
+P(t)= {0,	en otro caso
+
+	​
+
+
+ETAPA 7 (validación final)
+Comparaciones
+
+Comparas:
+
+MPC con modelo físico puro
+
+MPC con modelo grey-box
+
+Métricas:
+
+Error de seguimiento
+
+Consumo total de agua
+
+Estabilidad
+
+
+El coeficiente de estrés hídrico Ks(θ) se modela como una función sigmoidal suave del contenido de humedad del suelo, que toma valores en 
+[0,1] y aproxima la transición entre condiciones de suelo húmedo y estrés hídrico. La evapotranspiración potencial 
+ETc,pot(t)se modela como una señal periódica que representa la variabilidad climática. La evapotranspiración real resulta de la multiplicación de ambos términos, permitiendo desacoplar de forma explícita la demanda atmosférica del estado hídrico del suelo dentro del MPC.
+
+La precipitación no se modeló como un escalón ideal, sino como una función sigmoidal doble que representa el frente de entrada, el núcleo y la disipación de una tormenta. Esto permite una excitación climática físicamente realista y diferenciable, adecuada para control predictivo.
